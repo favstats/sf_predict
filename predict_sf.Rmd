@@ -1,0 +1,178 @@
+---
+title: "Tidy Template"
+author: "Fabio Votta"
+date: "The Date"
+output: html_document
+---
+
+This script is about:
+
+Using annoated label dataset with keras 
+
+## Packages and Folders
+
+```{r}
+# Install these packages if you don't have theme yet
+# devtools::install_github("favstats/tidytemplate")
+# devtools::install_github("systats/tidykeras")
+# install.packages("pacman")
+
+pacman::p_load(tidyverse, glue, tidykeras, keras, tidytext, textstem)
+
+# Creates folders
+# tidytemplate::data_dir()
+# tidytemplate::images_dir()
+```
+
+
+## Load Data
+
+```{r, data}
+meta <- read_csv("annotations_metadata.csv")
+
+hate <- meta %>% 
+  mutate(sentence = map_chr(file_id, ~ {
+    read_lines(file = glue::glue("all_files/{.x}.txt"))
+  })) %>% 
+  mutate(text = str_to_lower(sentence))
+
+tidytemplate::save_it(hate)
+
+test_filter <- dir("sampled_test") %>% str_remove(., ".txt")
+
+test_data <- hate %>% 
+  filter(file_id %in% test_filter)
+
+tidytemplate::save_it(test_data)
+
+
+train_filter <- dir("sampled_train") %>% str_remove(., ".txt")
+
+train_data <- hate %>% 
+  filter(file_id %in% train_filter)
+
+tidytemplate::save_it(train_data)
+
+hate %>% 
+  arrange(label)
+
+
+hate %>% 
+  count(label)
+```
+
+
+## tidykeras
+
+```{r}
+
+final <- hate %>% 
+  # randomization
+  filter(label %in% c("hate", "noHate")) %>% 
+  mutate(target = ifelse(label == "hate", 1, 0)) %>% 
+  group_by(target) %>% 
+  sample_n(1196) %>% 
+  ungroup() %>% 
+  mutate(text = lemmatize_strings(text)) %>% 
+  arrange(sample(file_id, size = length(file_id))) %>% 
+  mutate(split_id = sample(1:2, size = n(), replace = T, prob = c(.9, .1))) 
+
+final %>% glimpse 
+
+train <- final %>% filter(split_id == 1)
+test <- final %>% filter(split_id == 2)
+
+```
+
+
+## Experiment 1
+
+### Helper
+
+```{r}
+params_helper <- function(input, expend_params = F){
+  if(expend_params){
+    input$params <- cross_df(input$params)
+  } else {
+    input$params <- as_tibble(input$params)
+  }
+  return(input)
+}
+
+`%||%` <- function(lhs, rhs) {
+  if (!is.null(lhs)) {
+    lhs
+  } else {
+    rhs
+  }
+}
+```
+
+### Inspect Corpus
+
+```{r}
+corpus_desc <- corpus_description(train, "text")
+corpus_desc$token
+```
+
+```{r}
+corpus_desc$dat %>%
+  dplyr::select(ntok, nchar, target) %>%
+  gather(var, value, -target) %>%
+  ggplot(aes(value)) +
+  geom_histogram() +
+  facet_wrap(~var, scales = "free")
+```
+
+```{r}
+corpus_desc$token
+```
+
+
+### Run
+
+```{r}
+input_params <- list(
+  ### params
+  params = list(
+    ## model
+    model = c("k_glove", "k_lstm", "k_gru", "k_mcnn", "k_cnn_lstm", "k_gru_cnn"), 
+    ## text
+    in_dim = c(4000, 4200, 4500, 4800, 5000), #max_features vocabulary
+    in_length = c(40, 50), # sentence length 
+    out_dim = 1
+  ),
+  ### data
+  data = list(train = train, test = test)
+) %>% params_helper(expend_params = T)
+
+hate_model <- input_params %>% 
+  k_run
+
+save(hate_model, file = "hate_model.Rdata")
+```
+
+
+```{r}
+load("hate_model.Rdata")
+
+hate_model <- hate_model %>%
+  bind_rows() %>% 
+  mutate(run = 1:n()) %>% 
+  mutate(
+    tab = map(caret, ~.x$table),
+    acc = map_dbl(caret, ~.x$overall[1]),
+    timing = map_dbl(exec_time, ~.x$elapsed)
+  )
+
+hate_model  %>% 
+  arrange(desc(acc)) %>%
+  glimpse
+
+
+
+hate_model %>% 
+  arrange(desc(acc)) %>% 
+  .$tab %>% 
+  .[1]
+```
