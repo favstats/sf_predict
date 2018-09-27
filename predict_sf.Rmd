@@ -17,7 +17,7 @@ Using annoated label dataset with keras
 # devtools::install_github("systats/tidykeras")
 # install.packages("pacman")
 
-pacman::p_load(tidyverse, glue, tidykeras, keras, tidytext, textstem)
+pacman::p_load(tidyverse, glue, tidykeras, keras, tidytext, textstem, qdap)
 
 # Creates folders
 # tidytemplate::data_dir()
@@ -28,38 +28,53 @@ pacman::p_load(tidyverse, glue, tidykeras, keras, tidytext, textstem)
 ## Load Data
 
 ```{r, data}
-meta <- read_csv("annotations_metadata.csv")
-
-hate <- meta %>% 
-  mutate(sentence = map_chr(file_id, ~ {
-    read_lines(file = glue::glue("all_files/{.x}.txt"))
-  })) %>% 
-  mutate(text = str_to_lower(sentence))
-
-tidytemplate::save_it(hate)
-
-test_filter <- dir("sampled_test") %>% str_remove(., ".txt")
-
-test_data <- hate %>% 
-  filter(file_id %in% test_filter)
-
-tidytemplate::save_it(test_data)
-
-
-train_filter <- dir("sampled_train") %>% str_remove(., ".txt")
-
-train_data <- hate %>% 
-  filter(file_id %in% train_filter)
-
-tidytemplate::save_it(train_data)
-
-hate %>% 
-  arrange(label)
-
-
-hate %>% 
-  count(label)
+# meta <- read_csv("annotations_metadata.csv")
+# 
+# hate <- meta %>% 
+#   mutate(sentence = map_chr(file_id, ~ {
+#     read_lines(file = glue::glue("all_files/{.x}.txt"))
+#   })) %>% 
+#   mutate(text = str_to_lower(sentence))
+# 
+# tidytemplate::save_it(hate)
+# 
+# test_filter <- dir("sampled_test") %>% str_remove(., ".txt")
+# 
+# test_data <- hate %>% 
+#   filter(file_id %in% test_filter)
+# 
+# tidytemplate::save_it(test_data)
+# 
+# 
+# train_filter <- dir("sampled_train") %>% str_remove(., ".txt")
+# 
+# train_data <- hate %>% 
+#   filter(file_id %in% train_filter)
+# 
+# tidytemplate::save_it(train_data)
+# 
+# hate %>% 
+#   arrange(label)
+# 
+# 
+# hate %>% 
+#   count(label)
 ```
+
+```{r}
+hate <- tidytemplate::load_it("data/hate.Rdata")
+
+test_data <- tidytemplate::load_it("data/test_data.Rdata")  %>% 
+  # randomization
+  filter(label %in% c("hate", "noHate")) %>% 
+  mutate(target = ifelse(label == "hate", 1, 0)) 
+
+train_data <- tidytemplate::load_it("data/train_data.Rdata") %>% 
+  # randomization
+  filter(label %in% c("hate", "noHate")) %>% 
+  mutate(target = ifelse(label == "hate", 1, 0)) 
+```
+
 
 
 ## tidykeras
@@ -73,9 +88,31 @@ final <- hate %>%
   group_by(target) %>% 
   sample_n(1196) %>% 
   ungroup() %>% 
+  mutate(text = rm_stopwords(text, separate = F)) %>% 
   mutate(text = lemmatize_strings(text)) %>% 
   arrange(sample(file_id, size = length(file_id))) %>% 
   mutate(split_id = sample(1:2, size = n(), replace = T, prob = c(.9, .1))) 
+
+
+# hate_values <- hate %>% 
+#   # randomization
+#   filter(label %in% c("hate", "noHate")) %>% 
+#   mutate(target = ifelse(label == "hate", 1, 0)) %>% 
+#   filter(target == 1)
+# 
+# nohate_values <- hate %>% 
+#   # randomization
+#   filter(label %in% c("hate", "noHate")) %>% 
+#   mutate(target = ifelse(label == "hate", 1, 0)) %>% 
+#   filter(target == 0)  %>% 
+#   sample_n(2000)
+# 
+# 
+# final <- bind_rows(hate_values, nohate_values) %>% 
+#   mutate(text = rm_stopwords(text, separate = F)) %>% 
+#   mutate(text = lemmatize_strings(text)) %>% 
+#   arrange(sample(file_id, size = length(file_id))) %>% 
+#   mutate(split_id = sample(1:2, size = n(), replace = T, prob = c(.9, .1))) 
 
 final %>% glimpse 
 
@@ -138,8 +175,10 @@ input_params <- list(
     ## model
     model = c("k_glove", "k_lstm", "k_gru", "k_mcnn", "k_cnn_lstm", "k_gru_cnn"), 
     ## text
-    in_dim = c(4000, 4200, 4500, 4800, 5000), #max_features vocabulary
-    in_length = c(40, 50), # sentence length 
+    in_dim = c(4100, 4200, 4300, 4400, 
+               4500, 4600, 4700, 4800, 
+               4900, 5000), #max_features vocabulary
+    in_length = c(40, 45, 50), # sentence length 
     out_dim = 1
   ),
   ### data
@@ -148,6 +187,8 @@ input_params <- list(
 
 hate_model <- input_params %>% 
   k_run
+
+beepr::beep(28)
 
 save(hate_model, file = "hate_model.Rdata")
 ```
